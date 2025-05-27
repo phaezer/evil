@@ -6,9 +6,11 @@ import (
 	"go/parser"
 	"go/token"
 	"iter"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 )
 
 // File represents a parsed Go file
@@ -49,7 +51,7 @@ func ParseFile(fs *token.FileSet, filename string, src any, mode parser.Mode) (*
 	return f, nil
 }
 
-// Inspect calls [ast.Inspect] on the file with the given function
+// Inspect calls [ast.Inspect] on the [ast.File] node with the given fn
 func (f *File) Inspect(fn func(n ast.Node) bool) {
 	ast.Inspect(f.node, fn)
 }
@@ -60,11 +62,25 @@ func (f *File) Name() string {
 }
 
 // PackageName returns the package name of the file as defined in the node
-func (f *File) PackageName() string {
+func (f *File) Package() string {
 	return f.node.Name.String()
 }
 
-func ParseDir(fs *token.FileSet, path string, tags []string) ([]*File, error) {
+// Package represents a parsed Go package and its files
+type Package struct {
+	// name of the package as defined in the package declaration
+	name string
+	// path is the absolute filepath to the package
+	path string
+	// files is the list of files in the package
+	files []*File
+}
+
+// ParseDir parses all of the go files in a directory with the given [token.FileSet]
+// if tags is not nil, then only files that match any of the go:build tag constraints will be parsed
+//
+// ParseDir does not recurse into subdirectories
+func ParseDir(fs *token.FileSet, path string, tags []string) ([]*Package, error) {
 	// always use the absolute path
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -79,7 +95,7 @@ func ParseDir(fs *token.FileSet, path string, tags []string) ([]*File, error) {
 		return nil, err
 	}
 
-	var files []*File
+	pkgs := make(map[string]*Package)
 
 	for goFile := range dirIter {
 		f, err := ParseFile(fs, goFile, nil, parser.ParseComments)
@@ -98,53 +114,20 @@ func ParseDir(fs *token.FileSet, path string, tags []string) ([]*File, error) {
 			continue
 		}
 
-		// add the file to the list
-		files = append(files, f)
+		if _, ok := pkgs[f.Package()]; !ok {
+			pkgs[f.Package()] = &Package{
+				name: f.Package(),
+				path: path,
+			}
+		}
 
+		pkgs[f.Package()].files = append(pkgs[f.Package()].files, f)
 	}
 
-	return files, nil
+	return slices.Collect(maps.Values(pkgs)), nil
 }
 
-//
-//
-//
-//// inspectDir iterates over the files in a directory and calls fn for each file
-//// if fn returns false, the iteration stops
-//// fn is called with the absolute path to the file and the [os.DirEntry]
-////
-//// from: https://gist.github.com/phaezer/077d31c09d2d8d378f3541fa2293ee04
-//func inspectDir(dir string, fn func(path string, entry os.DirEntry) bool) error {
-//	abs, err := filepath.Abs(dir)
-//	if err != nil {
-//		return err
-//	}
-//
-//	stat, err := os.Stat(abs)
-//	if err != nil {
-//		// unlikely to have a [*os.PathError] if [filepath.Abs] didn't return an error
-//		return err
-//	}
-//
-//	if !stat.IsDir() {
-//		return fmt.Errorf("%s is not a directory", dir)
-//	}
-//
-//	entries, err := os.ReadDir(abs)
-//	if err != nil {
-//		return err
-//	}
-//
-//	for _, entry := range entries {
-//		p := path.Join(abs, entry.Name())
-//		if !fn(p, entry) {
-//			return nil
-//		}
-//	}
-//
-//	return nil
-//}
-
+// NotADirError is returned when a path is not a directory
 type NotADirError struct {
 	path string
 }

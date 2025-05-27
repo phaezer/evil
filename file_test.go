@@ -20,10 +20,6 @@ func (suite *FileTestSuite) SetupTest() {
 	suite.fs = token.NewFileSet()
 }
 
-//		log.Printf("package name: %#v\n", suite.file.node.Name.Name)
-//		log.Printf("import path: %#v\n", suite.file.filename)
-//		log.Printf("found functions: %v\n", slices.Collect(suite.file.IterFnNames()))
-//	}
 func (suite *FileTestSuite) TestParseFile() {
 	t := suite.T()
 
@@ -44,11 +40,14 @@ func (suite *FileTestSuite) TestParseDir() {
 	dir, err := filepath.Abs("examples/simple")
 	assert.NoError(t, err)
 
-	files, err := ParseDir(suite.fs, dir, nil)
+	pkgs, err := ParseDir(suite.fs, dir, nil)
 	assert.NoError(t, err)
-	assert.Len(t, files, 1)
+	assert.Len(t, pkgs, 1)
+	assert.Len(t, pkgs[0].files, 1)
+	assert.Equal(t, pkgs[0].name, "simple")
 }
 
+// todo: add tests that filter for specific tags in examples dir
 func TestFileSuiteSimple(t *testing.T) {
 	s := &FileTestSuite{}
 
