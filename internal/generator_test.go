@@ -1,4 +1,4 @@
-package evil
+package internal
 
 import (
 	"log"

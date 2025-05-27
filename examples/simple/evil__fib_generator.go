@@ -58,8 +58,7 @@ func Pi(ndigits int64) string {
 
 func main() {
 	g := evil.NewGenerator()
-
-	defer g.generate()
+	defer g.Write()
 
 	piNumDigits := 100
 	fib := simple.Fibonacci(1000)

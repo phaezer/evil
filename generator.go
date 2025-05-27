@@ -5,118 +5,111 @@ import (
 	"go/ast"
 	"go/build"
 	"go/token"
-	"iter"
-	"log"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"strings"
-	"sync"
 )
 
 // Generator is initialized in the temp main func and passed to the
 //
 //	calls to the Init and Register functions
 type Generator struct {
-	mu sync.RWMutex
+	// fs is the file set used to parse the files
 	fs *token.FileSet
-
+	// buf is a buffer that holds the generated code
 	buf strings.Builder
-
 	// files is a map of package files to their parsed asts
-	files map[string]*File
+	files []*ast.File
+	// pkg is the name of the package that generated files will use
+	pkg string
+	// filename is the name of the path that generated file will be written to
+	filename string
+	// caller holds the info of the function that instantiated the Generator
+	caller *callerInfo
+}
 
-	pkgName string
-	output  string
+func OutputName(name string) func(*Generator) {
+	return func(g *Generator) {
+		g.filename = name
+	}
+}
+
+func PackageName(name string) func(*Generator) {
+	return func(g *Generator) {
+		g.pkg = name
+	}
 }
 
 // NewGenerator creates a new Generator
-func NewGenerator(outputTo string, pkgName string) *Generator {
+func NewGenerator(opts ...func(*Generator)) *Generator {
 	g := &Generator{
-		fs:      token.NewFileSet(),
-		files:   make(map[string]*File),
-		pkgName: pkgName,
-		output:  outputTo,
+		fs:     token.NewFileSet(),
+		caller: getCallerInfo(1),
+	}
+
+	for _, opt := range opts {
+		opt(g)
+	}
+
+	if g.filename == "" {
+		// if output was not provided check if GOEVIL_OUTPUT was set,
+		// if not then use the caller's filename without .go extension + "__generated.go"
+
+		if out := os.Getenv("GOEVIL_OUTPUT"); out != "" {
+			g.filename = out
+		} else {
+			// use the caller's filename without the .go extension + "__generated.go"
+			g.filename = fmt.Sprintf("%s__generated.go",
+				strings.TrimSuffix(g.caller.fn.name, ".go"))
+		}
+	}
+
+	if g.pkg == "" {
+		// if package was not provided, use GOEVIL_PACKAGE env var if set
+		// this should be set if go generate was used
+		if out := os.Getenv("GOEVIL_PACKAGE"); out != "" {
+			g.pkg = out
+		} else {
+			// assume it's the main package if not specified
+			g.pkg = "main"
+		}
 	}
 
 	return g
 }
 
-func PackageFrom(path string) string {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		panic(err)
-	}
-
-	stat, err := os.Stat(abs)
-	if err != nil {
-		panic(err)
-	}
-
-	if stat.IsDir() {
-
-	}
-
-	// if the path is a directory, scan it for go files
-	if stat, err := os.Stat(abs); err == nil && stat.IsDir() {
-		// TODO: scan the directory for go files
-	}
-}
-
-func PackageNameFromFile(file *ast.File) string {
-	return file.Name.Name
-}
-
-// loadFile parses a file and adds it to the file map
-func (g *Generator) loadFile(filename string) *File {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	// check if the file has already been parsed; if it was, return it
-	if f, ok := g.files[filename]; ok {
-		return f
-	}
-
-	f, err := ParseFile(g.fs, filename)
-	if err != nil {
-		panic(fmt.Sprintf("could not parse file %s: %v", filename, err))
-	}
-
-	g.files[filename] = f
-	return f
-}
-
-// InitVar is used to initialize a variable in the global scope
 //
-//go:noinline
-func InitVar[T any](g *Generator, set T, to T) {
-	pc, file, line, ok := runtime.Caller(1)
-	if !ok {
-		panic("could not get calling function's PC")
-	}
-
-	log.Printf("pc = %#v, file = %#v\n, line = %#v", pc, file, line)
-
-	f := g.loadFile(file)
-
-	fnName, err := funcNameForPC(pc, f.ast.Name.Name)
-	if err != nil {
-		panic(err)
-	}
-
-	// find the caller function in the target file
-	callerFn := f.FindFnWithName(fnName)
-	if callerFn == nil {
-		panic(fmt.Sprintf("could not find caller function %s in target file", fnName))
-	}
-
-	matchingFn := f.MatchingCallExpr(fnName, line, callerFn)
-
-	if matchingFn == nil {
-		panic(fmt.Sprintf("could not find matching fn call expression in file %s on line %d", file, line))
-	}
-}
+//// InitVar is used to initialize a variable in the global scope
+////
+////go:noinline
+//func InitVar[T any](g *Generator, set T, to T) {
+//	pc, file, line, ok := runtime.Caller(1)
+//	if !ok {
+//		panic("could not get calling function's PC")
+//	}
+//
+//	log.Printf("pc = %#v, file = %#v\n, line = %#v", pc, file, line)
+//
+//	f := g.loadFile(file)
+//
+//	fnName, err := funcNameForPC(pc, f.ast.Name.Name)
+//	if err != nil {
+//		panic(err)
+//	}
+//
+//	// find the caller function in the target file
+//	callerFn := f.FindFnWithName(fnName)
+//	if callerFn == nil {
+//		panic(fmt.Sprintf("could not find caller function %s in target file", fnName))
+//	}
+//
+//	matchingFn := f.MatchingCallExpr(fnName, line, callerFn)
+//
+//	if matchingFn == nil {
+//		panic(fmt.Sprintf("could not find matching fn call expression in file %s on line %d", file, line))
+//	}
+//}
 
 func funcNameForPC(pc uintptr, filePkgName string) (string, error) {
 	callerFnName := runtime.FuncForPC(pc).Name()
