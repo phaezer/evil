@@ -1,7 +1,5 @@
 package simple
 
-import "github.com/phaezer/evil"
-
 //go:generate evil
 
 // Fibonacci function returns a slice containing the Fibonacci sequence up to n terms.
@@ -24,7 +22,3 @@ func Fibonacci(n int) []int {
 }
 
 var fib []int
-
-func Ref() {
-	fib = evil.Stub[[]int]("fib")
-}

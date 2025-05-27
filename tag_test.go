@@ -93,4 +93,10 @@ func main() {}
 		t.Fatal(err)
 	}
 	assert.False(t, match)
+
+	match, err = MatchTagsInFileNode(file, nil, []string{"linux"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.False(t, match)
 }

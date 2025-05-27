@@ -3,6 +3,7 @@ package evil
 import (
 	"go/ast"
 	"go/build/constraint"
+	"runtime/debug"
 	"strings"
 )
 
@@ -34,13 +35,11 @@ func MatchTagsInFileNode(node *ast.File, tags []string, ignore []string) (bool, 
 	var exprs []constraint.Expr
 	for _, cg := range node.Comments {
 		for _, cmt := range cg.List {
-			txt := cmt.Text
-
-			if !commentIsBuildTag(txt) {
+			if !commentIsBuildTag(cmt.Text) {
 				continue
 			}
 
-			cst, err := constraint.Parse(txt)
+			cst, err := constraint.Parse(cmt.Text)
 			if err != nil {
 				return false, err
 			}
@@ -94,4 +93,23 @@ func tagsMatchAllExpr(tags []string, constraints []constraint.Expr) bool {
 	}
 
 	return cnt == len(constraints)
+}
+
+// RuntimeBuildTags returns the build tags used to execute the current binary
+func RuntimeBuildTags() []string {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		panic(readDebugBuildError)
+	}
+
+	var tags []string
+
+	// include the tags used to execute this file
+	for _, bs := range bi.Settings {
+		if bs.Key == "-tags" {
+			tags = parseTagString(bs.Value)
+		}
+	}
+
+	return tags
 }

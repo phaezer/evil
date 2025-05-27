@@ -5,6 +5,10 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"iter"
+	"os"
+	"path"
+	"path/filepath"
 )
 
 // File represents a parsed Go file
@@ -58,4 +62,131 @@ func (f *File) Name() string {
 // PackageName returns the package name of the file as defined in the node
 func (f *File) PackageName() string {
 	return f.node.Name.String()
+}
+
+func ParseDir(fs *token.FileSet, path string, tags []string) ([]*File, error) {
+	// always use the absolute path
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+
+	// iterate over all of the go files in the directory
+	dirIter, err := DirIterator(abs, func(path string, entry os.DirEntry) bool {
+		return !entry.IsDir() && filepath.Ext(entry.Name()) == ".go"
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var files []*File
+
+	for goFile := range dirIter {
+		f, err := ParseFile(fs, goFile, nil, parser.ParseComments)
+		if err != nil {
+			return nil, err
+		}
+
+		matched, err := MatchTagsInFileNode(f.node, tags, IgnoreTags)
+		if err != nil {
+			return nil, err
+		}
+
+		if !matched {
+			// remove the file from the token set
+			fs.RemoveFile(f.token)
+			continue
+		}
+
+		// add the file to the list
+		files = append(files, f)
+
+	}
+
+	return files, nil
+}
+
+//
+//
+//
+//// inspectDir iterates over the files in a directory and calls fn for each file
+//// if fn returns false, the iteration stops
+//// fn is called with the absolute path to the file and the [os.DirEntry]
+////
+//// from: https://gist.github.com/phaezer/077d31c09d2d8d378f3541fa2293ee04
+//func inspectDir(dir string, fn func(path string, entry os.DirEntry) bool) error {
+//	abs, err := filepath.Abs(dir)
+//	if err != nil {
+//		return err
+//	}
+//
+//	stat, err := os.Stat(abs)
+//	if err != nil {
+//		// unlikely to have a [*os.PathError] if [filepath.Abs] didn't return an error
+//		return err
+//	}
+//
+//	if !stat.IsDir() {
+//		return fmt.Errorf("%s is not a directory", dir)
+//	}
+//
+//	entries, err := os.ReadDir(abs)
+//	if err != nil {
+//		return err
+//	}
+//
+//	for _, entry := range entries {
+//		p := path.Join(abs, entry.Name())
+//		if !fn(p, entry) {
+//			return nil
+//		}
+//	}
+//
+//	return nil
+//}
+
+type NotADirError struct {
+	path string
+}
+
+func (e NotADirError) Error() string {
+	return fmt.Sprintf("%s is not a directory", e.path)
+}
+
+// DirIterator iterates over the files in a directory and calls fn for each file
+// if fn returns false, the iteration stops
+// fn is called with the absolute path to the file and the [os.DirEntry]
+//
+// from: https://gist.github.com/phaezer/077d31c09d2d8d378f3541fa2293ee04
+func DirIterator(dir string, f func(string, os.DirEntry) bool) (iter.Seq[string], error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	stat, err := os.Stat(abs)
+	if err != nil {
+		// unlikely to have a [*os.PathError] if [filepath.Abs] didn't return an error
+		return nil, err
+	}
+
+	if !stat.IsDir() {
+		return nil, &NotADirError{path: dir}
+	}
+
+	entries, err := os.ReadDir(abs)
+	if err != nil {
+		return nil, err
+	}
+
+	return func(yield func(string) bool) {
+		for _, entry := range entries {
+			p := path.Join(abs, entry.Name())
+			if f == nil || f(p, entry) {
+				if !yield(p) {
+					return
+				}
+			}
+		}
+	}, nil
 }
